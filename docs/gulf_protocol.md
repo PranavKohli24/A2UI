@@ -52,10 +52,10 @@ The protocol is designed to be "LLM-friendly," meaning its structure is declarat
 
 Communication occurs via a JSON Lines (JSONL) stream. The client parses each line as a distinct message and incrementally builds the UI. The server-to-client protocol defines four message types:
 
-- `updateSurface`: Provides a list of component definitions to be added to or updated in a specific UI area called a "surface."
+- `surfaceUpdate`: Provides a list of component definitions to be added to or updated in a specific UI area called a "surface."
 - `dataModelUpdate`: Provides new data to be inserted into or to replace the client's data model. All surfaces share the same data model.
 - `beginRendering`: Signals to the client that it has enough information to perform the initial render, specifying the ID of the root component.
-- `deleteSurface`: Explicitly removes a surface and its contents from the UI.
+- `surfaceDeletion`: Explicitly removes a surface and its contents from the UI.
 
 Client-to-server communication for user interactions is handled separately via a JSON payload sent to a REST API. This message can be one of several types:
 - `userAction`: Reports a user-initiated action from a component.
@@ -81,11 +81,11 @@ All UI descriptions are transmitted from the server to the client as a stream of
 
 ### 1.3. Surfaces: Managing Multiple UI Regions
 
-A **Surface** is a contiguous portion of screen real estate into which a GULF UI can be rendered. The protocol introduces the concept of a `surfaceId` to uniquely identify and manage these areas. This allows a single GULF stream to control multiple, independent UI regions simultaneously. Each surface has a separate root component and a separate hierarchy of components. All surfaces share the same data model, to allow displaying the same data in different ways across multiple surfaces.
+A **Surface** is a contiguous portion of screen real estate into which a GULF UI can be rendered. The protocol introduces the concept of a `surfaceId` to uniquely identify and manage these areas. This allows a single GULF stream to control multiple, independent UI regions simultaneously. Each surface has a separate root component and a separate hierarchy of components. Each surface has a separate data model, to avoid collision of keys when working with a large number of surfaces.
 
 For example, in a chat application, each AI-generated response could be rendered into a separate surface within the conversation history. A separate, persistent surface could be used for a side panel that displays related information.
 
-The `surfaceId` is used in `updateSurface` messages to direct component changes to the correct area, and the `deleteSurface` message allows for explicitly removing a surface and its contents from the UI.
+The `surfaceId` is used in `surfaceUpdate` messages to direct component changes to the correct area, and the `surfaceDeletion` message allows for explicitly removing a surface and its contents from the UI.
 
 ### 1.4. Data Flow Model
 
@@ -100,7 +100,7 @@ The GULF protocol is composed of a server-to-client stream describing UI and ind
 3.  **Render Signal:** The server sends a `beginRendering` message with the `root` component's ID. This prevents a "flash of incomplete content." The client buffers incoming components and data but waits for this explicit signal before attempting the first render, ensuring the initial view is coherent.
 4.  **Client-Side Rendering:** The client, now in a "ready" state, starts at the `root` component. It recursively walks the component tree by looking up component IDs in its buffer. It resolves any data bindings against the data model and uses its `WidgetRegistry` to instantiate native widgets.
 5.  **User Interaction and Event Handling:** The user interacts with a rendered widget (e.g., taps a button). The client constructs a `userAction` JSON payload, resolving any data bindings from the component's `action.context`. It sends this payload (as part of a larger client event message) to a pre-configured REST API endpoint on the server via a `POST` request.
-6.  **Dynamic Updates:** The server processes the `userAction`. If the UI needs to change in response, the server sends new `updateSurface` and `dataModelUpdate` messages over the original SSE stream. As these arrive, the client updates its component buffer and data model, and the UI re-renders to reflect the changes. The server can also send `deleteSurface` to remove a UI region.
+6.  **Dynamic Updates:** The server processes the `userAction`. If the UI needs to change in response, the server sends new `updateSurface` and `dataModelUpdate` messages over the original SSE stream. As these arrive, the client updates its component buffer and data model, and the UI re-renders to reflect the changes. The server can also send `surfaceDeletion` to remove a UI region.
 
 ```mermaid
 sequenceDiagram
@@ -126,7 +126,7 @@ sequenceDiagram
     Server-->>-Client: 11. HTTP 200 OK
 
     loop Dynamic Updates in Response to Event
-        Server->>+Client: updateSurface, dataModelUpdate, or deleteSurface (via SSE)
+        Server->>+Client: surfaceUpdate, dataModelUpdate, or surfaceDeletion (via SSE)
         Client->>Client: Update component map, data model, or remove surface
         Note right of Client: Triggers UI rebuild
         Client-->>-Server: (UI is updated)
@@ -194,7 +194,6 @@ This message is the primary way UI structure is defined. It contains a `componen
 Each object in the `components` array has the following structure:
 
 - `id`: A required, unique string that identifies this specific component instance. This is used for parent-child references.
-- `weight`: An optional number used by `Row` and `Column` containers to determine proportional sizing.
 - `componentProperties`: A required object that defines the component's type and properties.
 
 ### 2.4.`componentProperties` (Generic Object)
@@ -382,7 +381,7 @@ While the server-to-client UI definition is a one-way stream, user interactions 
 
 ### 5.1. The Client Event Message
 
-The client sends a single JSON object that acts as a wrapper. It must contain exactly one of the following keys: `userAction`, `clientCapabilities`, or `error`.
+The client sends a single JSON object that acts as a wrapper. It must contain exactly one of the following keys: `userAction`, `clientUiCapabilities`, or `error`.
 
 ### 5.2. The `userAction` Message
 
@@ -393,11 +392,11 @@ The `userAction` object has the following structure:
 - `actionName` (string, required): The name of the action, taken directly from the `action.action` property of the component (e.g., "submit_form").
 - `sourceComponentId` (string, required): The `id` of the component that triggered the event (e.g., "my_button").
 - `timestamp` (string, required): An ISO 8601 timestamp of when the event occurred (e.g., "2025-09-19T17:01:00Z").
-- `resolvedContext` (object, required): A JSON object containing the key-value pairs from the component's `action.context`, after resolving all `BoundValue`s against the data model.
+- `context` (object, required): A JSON object containing the key-value pairs from the component's `action.context`, after resolving all `BoundValue`s against the data model.
 
-The process for resolving the `action.context` remains the same: the client iterates over the `context` array, resolves all literal or data-bound values, and constructs the `resolvedContext` object.
+The process for resolving the `action.context` remains the same: the client iterates over the `context` array, resolves all literal or data-bound values, and constructs the `context` object.
 
-### 5.3. The `clientCapabilities` Message
+### 5.3. The `clientUiCapabilities` Message
 
 This message is sent by the client to inform the server about its capabilities. This is crucial for supporting different component sets. The message must contain exactly one of the following properties:
 
@@ -450,7 +449,7 @@ This message provides a feedback mechanism for the server. It is sent when the c
         "actionName": "submit_form",
         "sourceComponentId": "submit_btn",
         "timestamp": "2025-09-19T17:05:00Z",
-        "resolvedContext": {
+        "context": {
           "userInput": "User input text",
           "formId": "f-123"
         }
@@ -557,9 +556,9 @@ This section provides the formal JSON Schema for a single server-to-client messa
         "contents"
       ]
     },
-    "deleteSurface": {
-      "title": "DeleteSurface Message",
-      "description": "A schema for a DeleteSurface message in the GULF streaming UI protocol. This message signals that a surface should be removed from the UI.",
+    "surfaceDeletion": {
+      "title": "SurfaceDeletion Message",
+      "description": "A schema for a surfaceDeletion message in the GULF streaming UI protocol. This message signals that a surface should be removed from the UI.",
       "type": "object",
       "properties": {
         "surfaceId": {

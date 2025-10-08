@@ -18,8 +18,7 @@
         }
       },
       "required": [
-        "root",
-        "type"
+        "root"
       ]
     },
     "surfaceUpdate": {
@@ -56,8 +55,7 @@
         }
       },
       "required": [
-        "components",
-        "type"
+        "components"
       ]
     },
     "dataModelUpdate": {
@@ -74,13 +72,12 @@
         }
       },
       "required": [
-        "contents",
-        "type"
+        "contents"
       ]
     },
-    "deleteSurface": {
-      "title": "DeleteSurface Message",
-      "description": "A schema for a DeleteSurface message in the A2A streaming UI protocol. This message signals that a surface should be removed from the UI.",
+    "surfaceDeletion": {
+      "title": "SurfaceDeletion Message",
+      "description": "A schema for a SurfaceDeletion message in the A2A streaming UI protocol. This message signals that a surface should be removed from the UI.",
       "type": "object",
       "properties": {
         "surfaceId": {
